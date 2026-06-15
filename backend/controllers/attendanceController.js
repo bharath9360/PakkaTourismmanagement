@@ -38,22 +38,26 @@ const checkIn = async (req, res, next) => {
         return res.status(400).json({ success: false, message: 'Location is required for In-Office check-in' });
       }
 
-      const employee = await User.findById(req.user._id);
-      if (employee?.officeLocation?.lat && employee?.officeLocation?.lng) {
-        geoFenceDistance = getDistance(latitude, longitude, employee.officeLocation.lat, employee.officeLocation.lng);
-        const radius = employee.officeLocation.radius || 500;
+      // Use admin's primary configured office location
+      const admin = await User.findOne({ role: 'admin', isActive: true });
+      const officeLocation = admin?.officeLocations?.[0] ||
+                             (await User.findById(req.user._id))?.officeLocation;
+
+      if (officeLocation?.lat && officeLocation?.lng) {
+        geoFenceDistance = getDistance(latitude, longitude, officeLocation.lat, officeLocation.lng);
+        const radius = officeLocation.radius || 50; // Default 50m precision
 
         if (geoFenceDistance > radius) {
           geoFenceStatus = 'failed';
 
-          // Create geo-fence failure notification for admin
+          // Notify admin of geo-fence failure
           const admins = await User.find({ role: 'admin', isActive: true });
-          for (const admin of admins) {
+          for (const adminUser of admins) {
             await Notification.create({
-              recipient: admin._id,
+              recipient: adminUser._id,
               type: 'geofence_failure',
               title: 'Geo-fence Failure',
-              message: `${req.user.name} is ${Math.round(geoFenceDistance)}m away from office (limit: ${radius}m). In-Office check-in rejected.`,
+              message: `${req.user.name} is ${Math.round(geoFenceDistance)}m from office "${officeLocation.name || 'Office'}" (limit: ${radius}m). In-Office check-in rejected.`,
               actionUrl: '/attendance'
             });
           }
@@ -61,15 +65,18 @@ const checkIn = async (req, res, next) => {
           return res.status(403).json({
             success: false,
             message: `You are ${Math.round(geoFenceDistance)}m from office. Must be within ${radius}m for In-Office check-in.`,
-            geoFenceDistance: Math.round(geoFenceDistance)
+            geoFenceDistance: Math.round(geoFenceDistance),
+            required: radius,
+            officeName: officeLocation.name || 'Configured Office'
           });
         }
         geoFenceStatus = 'verified';
       } else {
-        // No office location configured — allow but mark pending
+        // No office location configured — allow but mark as pending
         geoFenceStatus = 'pending';
       }
     } else if (workMode === 'wfh') {
+      // WFH: store location but bypass distance check
       geoFenceStatus = 'wfh';
     }
 

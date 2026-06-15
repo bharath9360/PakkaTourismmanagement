@@ -27,12 +27,20 @@ const UserSchema = new mongoose.Schema({
     lng:  { type: Number },
     city: { type: String }
   },
-  officeLocation: {                                           // Assigned office geo-fence
+  officeLocation: {                                           // Assigned office geo-fence (employee-specific)
     name:   { type: String },
     lat:    { type: Number },
     lng:    { type: Number },
-    radius: { type: Number, default: 500 }                    // Geo-fence radius in meters
+    radius: { type: Number, default: 50 }                     // Geo-fence radius in meters
   },
+
+  // Admin-managed list of all office locations (stored on admin user)
+  officeLocations: [{
+    name:   { type: String, required: true },
+    lat:    { type: Number, required: true },
+    lng:    { type: Number, required: true },
+    radius: { type: Number, default: 50 }                     // Default 50m precision
+  }],
 }, { timestamps: true });
 
 // Hash password before saving

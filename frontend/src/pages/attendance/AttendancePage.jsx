@@ -31,6 +31,7 @@ export default function AttendancePage() {
   const [faceVerified, setFaceVerified] = useState(false);
   const [location, setLocation]   = useState(null);
   const [locationError, setLocationError] = useState('');
+  const [geoStatus, setGeoStatus] = useState('idle'); // idle | fetching | granted | denied | unsupported
   const [scanning, setScanning]   = useState(false);
   const [scanPct, setScanPct]     = useState(0);
   const [checkedIn, setCheckedIn] = useState(false);
@@ -64,6 +65,13 @@ export default function AttendancePage() {
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(t);
+  }, []);
+
+  // Auto-fetch geolocation on mount for employees
+  useEffect(() => {
+    if (!isAdmin) {
+      autoFetchLocation();
+    }
   }, []);
 
   // Load today's record on mount
@@ -176,28 +184,55 @@ export default function AttendancePage() {
         clearInterval(iv);
         setFaceVerified(true);
         stopCamera();
-        setTimeout(() => setStep('location'), 500);
+        // If location already fetched on mount, go straight to work mode
+        setTimeout(() => {
+          if (location) {
+            setStep('mode');
+          } else {
+            setStep('location');
+          }
+        }, 500);
       }
     }, 120);
   };
 
   /* ─── Location ─────────────────────────────────────────────────────────── */
-  const requestLocation = () => {
-    setLocationError('');
+  const autoFetchLocation = useCallback(() => {
     if (!navigator.geolocation) {
-      setLocationError('Geolocation not supported by your browser');
+      setGeoStatus('unsupported');
+      setLocationError('Geolocation is not supported by your browser');
       return;
     }
+    setGeoStatus('fetching');
+    setLocationError('');
     navigator.geolocation.getCurrentPosition(
       (pos) => {
-        setLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy });
-        setStep('mode');
+        const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy };
+        setLocation(coords);
+        setGeoStatus('granted');
       },
       (err) => {
-        setLocationError(err.message || 'Location permission denied');
+        setGeoStatus('denied');
+        if (err.code === 1) {
+          setLocationError('Location permission denied. Please allow location access in your browser settings and refresh.');
+        } else if (err.code === 2) {
+          setLocationError('Location unavailable. Please check your device GPS.');
+        } else if (err.code === 3) {
+          setLocationError('Location request timed out. Please retry.');
+        } else {
+          setLocationError(err.message || 'Location permission denied');
+        }
       },
-      { enableHighAccuracy: true, timeout: 10000 }
+      { enableHighAccuracy: true, timeout: 12000, maximumAge: 30000 }
     );
+  }, []);
+
+  const requestLocation = () => {
+    autoFetchLocation();
+    // After face scan → move to mode selection if location already granted
+    if (geoStatus === 'granted') {
+      setStep('mode');
+    }
   };
 
   /* ─── Check In ─────────────────────────────────────────────────────────── */
@@ -526,22 +561,78 @@ export default function AttendancePage() {
                 </div>
               )}
 
-              {/* Step: Location */}
+              {/* Step: Location — auto-triggered, shows geo status */}
               {step === 'location' && (
                 <div style={{ textAlign: 'center' }}>
                   <div style={{ fontSize: '48px', marginBottom: '12px' }}>✅</div>
                   <div style={{ fontWeight: 700, fontSize: '14px', color: 'var(--color-success)', marginBottom: '4px' }}>Face Verified!</div>
-                  <div style={{ fontSize: '13px', color: 'var(--color-text-muted)', marginBottom: '20px' }}>
-                    Step 3 of 4: Grant location access
+                  <div style={{ fontSize: '13px', color: 'var(--color-text-muted)', marginBottom: '16px' }}>
+                    Step 3 of 4: Getting your location
                   </div>
-                  <div style={{ background: 'var(--color-bg-secondary)', borderRadius: '10px', padding: '12px', marginBottom: '16px', fontSize: '12px', color: 'var(--color-text-muted)', lineHeight: 1.6 }}>
-                    📍 Your GPS coordinates are required for geo-fence verification. Your location is only stored for attendance purposes.
+
+                  {/* Fetching state */}
+                  {geoStatus === 'fetching' && (
+                    <div style={{ background: 'rgba(37,99,235,0.06)', border: '1px solid rgba(37,99,235,0.2)', borderRadius: '12px', padding: '16px', marginBottom: '16px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', marginBottom: '8px' }}>
+                        <div style={{ width: 18, height: 18, border: '2.5px solid rgba(37,99,235,0.3)', borderTopColor: '#2563EB', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+                        <span style={{ fontSize: '13px', fontWeight: 600, color: '#2563EB' }}>📡 Fetching your location…</span>
+                      </div>
+                      <div style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>Allow the browser location popup if it appears</div>
+                    </div>
+                  )}
+
+                  {/* Granted state */}
+                  {geoStatus === 'granted' && location && (
+                    <div style={{ background: 'rgba(16,185,129,0.07)', border: '1px solid rgba(16,185,129,0.3)', borderRadius: '12px', padding: '14px', marginBottom: '16px' }}>
+                      <div style={{ fontSize: '13px', fontWeight: 700, color: '#059669', marginBottom: '8px' }}>✅ Location Captured!</div>
+                      <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', flexWrap: 'wrap' }}>
+                        <div style={{ background: 'rgba(255,255,255,0.5)', borderRadius: '8px', padding: '6px 12px', fontSize: '11px', fontFamily: 'monospace', color: '#047857' }}>
+                          Lat: {location.lat.toFixed(6)}
+                        </div>
+                        <div style={{ background: 'rgba(255,255,255,0.5)', borderRadius: '8px', padding: '6px 12px', fontSize: '11px', fontFamily: 'monospace', color: '#047857' }}>
+                          Lng: {location.lng.toFixed(6)}
+                        </div>
+                        {location.accuracy && (
+                          <div style={{ background: 'rgba(255,255,255,0.5)', borderRadius: '8px', padding: '6px 12px', fontSize: '11px', color: '#059669' }}>
+                            ±{Math.round(location.accuracy)}m accuracy
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Denied state */}
+                  {(geoStatus === 'denied' || geoStatus === 'unsupported') && (
+                    <div style={{ background: 'rgba(220,38,38,0.07)', border: '1px solid rgba(220,38,38,0.25)', borderRadius: '12px', padding: '14px', marginBottom: '16px', textAlign: 'left' }}>
+                      <div style={{ fontSize: '13px', fontWeight: 700, color: '#DC2626', marginBottom: '6px' }}>❌ Location Access Denied</div>
+                      <div style={{ fontSize: '12px', color: '#7F1D1D', lineHeight: 1.6 }}>{locationError}</div>
+                      <div style={{ marginTop: '10px', fontSize: '11px', color: '#991B1B', background: 'rgba(220,38,38,0.08)', borderRadius: '8px', padding: '8px 12px' }}>
+                        <strong>To fix:</strong> Click the 🔒 icon in your browser address bar → Allow Location → Refresh the page
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Idle / initial */}
+                  {geoStatus === 'idle' && (
+                    <div style={{ background: 'var(--color-bg-secondary)', borderRadius: '10px', padding: '12px', marginBottom: '16px', fontSize: '12px', color: 'var(--color-text-muted)', lineHeight: 1.6 }}>
+                      📍 Your GPS coordinates are required for geo-fence verification.
+                    </div>
+                  )}
+
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    {(geoStatus === 'denied' || geoStatus === 'idle') && (
+                      <button className="btn btn-primary" style={{ flex: 1, justifyContent: 'center', padding: '12px' }}
+                        onClick={requestLocation}>
+                        📍 Retry Location
+                      </button>
+                    )}
+                    {geoStatus === 'granted' && (
+                      <button className="btn btn-success" style={{ flex: 1, justifyContent: 'center', padding: '12px', fontWeight: 700 }}
+                        onClick={() => setStep('mode')}>
+                        ✅ Continue →
+                      </button>
+                    )}
                   </div>
-                  {locationError && <div style={{ color: '#DC2626', fontSize: '12px', marginBottom: '12px' }}>⚠ {locationError}</div>}
-                  <button className="btn btn-primary" style={{ width: '100%', justifyContent: 'center', padding: '12px' }}
-                    onClick={requestLocation}>
-                    📍 Allow Location
-                  </button>
                 </div>
               )}
 
