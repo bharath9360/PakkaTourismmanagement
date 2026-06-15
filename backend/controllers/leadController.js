@@ -21,35 +21,157 @@ async function sendNotification(io, recipientId, type, title, message, leadId, a
   return notif;
 }
 
+// ─── Smart Priority Aggregation Pipeline ─────────────────────────────────────
+// Rule: pax >= 6 AND travelDate within next 10 days → highPriority: true → top
+// smartScore = composite urgency (daysUntilTravel weight + pax weight + priority weight)
+// Final sort: highPriority desc → smartScore desc → new_inquiry first → updatedAt desc
+function buildSmartPipeline(matchFilter, skip, limit) {
+  const now = new Date();
+  const tenDaysLater = new Date(now.getTime() + 10 * 24 * 60 * 60 * 1000);
+
+  // Status priority order: new_inquiry=0, contacted=1, negotiation=2 … lost=7
+  const STATUS_ORDER = [
+    'new_inquiry', 'contacted', 'negotiation', 'quote_sent',
+    'advance_pending', 'confirmed', 'completed', 'lost'
+  ];
+
+  return [
+    // Stage 1: Apply base filters
+    { $match: matchFilter },
+
+    // Stage 2: Compute smart priority fields
+    { $addFields: {
+      // highPriority: true when pax >= 6 AND travelDate is within next 10 days
+      highPriority: {
+        $and: [
+          { $gte: ['$totalPax', 6] },
+          { $ne: ['$travelDate', null] },
+          { $gte: ['$travelDate', now] },
+          { $lte: ['$travelDate', tenDaysLater] },
+        ]
+      },
+      // daysUntilTravel: how many days until travel date (null if no date)
+      daysUntilTravel: {
+        $cond: [
+          { $and: [{ $ne: ['$travelDate', null] }, { $gte: ['$travelDate', now] }] },
+          { $divide: [{ $subtract: ['$travelDate', now] }, 86400000] }, // ms → days
+          null
+        ]
+      },
+      // Numeric priority weight: urgent=4, high=3, medium=2, low=1
+      priorityWeight: {
+        $switch: {
+          branches: [
+            { case: { $eq: ['$priority', 'urgent'] }, then: 4 },
+            { case: { $eq: ['$priority', 'high']   }, then: 3 },
+            { case: { $eq: ['$priority', 'medium'] }, then: 2 },
+            { case: { $eq: ['$priority', 'low']    }, then: 1 },
+          ],
+          default: 2
+        }
+      },
+      // Status sort order: new_inquiry=0 sorts first
+      statusOrder: {
+        $switch: {
+          branches: STATUS_ORDER.map((s, i) => ({ case: { $eq: ['$leadStatus', s] }, then: i })),
+          default: 99
+        }
+      },
+    }},
+
+    // Stage 3: Compute composite smartScore
+    // Higher score = more urgent. Formula:
+    //   base: priorityWeight * 10
+    //   + pax bonus: min(totalPax, 20) * 0.5
+    //   + travel urgency: max(0, 30 - daysUntilTravel) — closer date = higher score
+    //   + highPriority bonus: 50 extra points
+    { $addFields: {
+      smartScore: {
+        $add: [
+          { $multiply: ['$priorityWeight', 10] },
+          { $multiply: [{ $min: [{ $ifNull: ['$totalPax', 1] }, 20] }, 0.5] },
+          { $cond: [
+            { $ne: ['$daysUntilTravel', null] },
+            { $max: [0, { $subtract: [30, '$daysUntilTravel'] }] },
+            0
+          ]},
+          { $cond: ['$highPriority', 50, 0] },
+        ]
+      }
+    }},
+
+    // Stage 4: Sort — highPriority first, then smartScore desc, then status order, then recency
+    { $sort: {
+      highPriority: -1,   // true (1) before false (0)
+      smartScore:   -1,   // highest score first
+      statusOrder:   1,   // new_inquiry (0) before contacted (1), etc.
+      updatedAt:    -1,   // most recently updated within same tier
+    }},
+
+    // Stage 5: Pagination
+    ...(skip    !== undefined ? [{ $skip:  skip          }] : []),
+    ...(limit   !== undefined ? [{ $limit: parseInt(limit) }] : []),
+
+    // Stage 6: Populate assignedEmployee and createdBy
+    { $lookup: { from: 'users', localField: 'assignedEmployee', foreignField: '_id', as: '_emp' } },
+    { $lookup: { from: 'users', localField: 'createdBy',        foreignField: '_id', as: '_creator' } },
+    { $addFields: {
+      assignedEmployee: { $arrayElemAt: [
+        { $map: { input: '$_emp', as: 'e', in: { _id: '$$e._id', name: '$$e.name', avatar: '$$e.avatar', email: '$$e.email' } } },
+        0
+      ]},
+      createdBy: { $arrayElemAt: [
+        { $map: { input: '$_creator', as: 'c', in: { _id: '$$c._id', name: '$$c.name' } } },
+        0
+      ]},
+    }},
+    { $project: { _emp: 0, _creator: 0 } },
+  ];
+}
+
 // ─── GET /api/leads ──────────────────────────────────────────────────────────
 const getLeads = async (req, res, next) => {
   try {
-    const { leadStatus, assignedEmployee, priority, search, page = 1, limit = 50, unassigned } = req.query;
+    const {
+      leadStatus, assignedEmployee, priority, search,
+      page = 1, limit = 50, unassigned, smartSort = 'true'
+    } = req.query;
+
     const filter = {};
 
     // Employees only see their own leads
     if (req.user.role === 'employee') filter.assignedEmployee = req.user._id;
 
-    if (leadStatus)        filter.leadStatus = leadStatus;
-    if (assignedEmployee)  filter.assignedEmployee = assignedEmployee;
-    if (priority)          filter.priority = priority;
-    if (unassigned === 'true') filter.assignedEmployee = null;
+    if (leadStatus)             filter.leadStatus = leadStatus;
+    if (assignedEmployee)       filter.assignedEmployee = new (require('mongoose').Types.ObjectId)(assignedEmployee);
+    if (priority)               filter.priority = priority;
+    if (unassigned === 'true')  filter.assignedEmployee = null;
 
     if (search) {
       filter.$or = [
         { customerName: { $regex: search, $options: 'i' } },
         { mobileNumber: { $regex: search, $options: 'i' } },
-        { destination: { $regex: search, $options: 'i' } },
+        { destination:  { $regex: search, $options: 'i' } },
       ];
     }
 
     const total = await Lead.countDocuments(filter);
-    const leads = await Lead.find(filter)
-      .populate('assignedEmployee', 'name avatar email')
-      .populate('createdBy', 'name')
-      .sort({ updatedAt: -1 })
-      .skip((page - 1) * limit)
-      .limit(parseInt(limit));
+
+    let leads;
+    if (smartSort !== 'false') {
+      // Use Smart Priority aggregation
+      leads = await Lead.aggregate(
+        buildSmartPipeline(filter, (page - 1) * parseInt(limit), parseInt(limit))
+      );
+    } else {
+      // Fall back to simple sort
+      leads = await Lead.find(filter)
+        .populate('assignedEmployee', 'name avatar email')
+        .populate('createdBy', 'name')
+        .sort({ updatedAt: -1 })
+        .skip((page - 1) * parseInt(limit))
+        .limit(parseInt(limit));
+    }
 
     res.json({ success: true, total, data: leads });
   } catch (err) { next(err); }
@@ -92,18 +214,23 @@ const createLead = async (req, res, next) => {
 };
 
 // ─── GET /api/leads/kanban ───────────────────────────────────────────────────
+// Each kanban column is sorted by Smart Priority (highPriority cards float to top)
 const getKanban = async (req, res, next) => {
   try {
-    const filter = req.user.role === 'employee' ? { assignedEmployee: req.user._id } : {};
+    const baseFilter = req.user.role === 'employee'
+      ? { assignedEmployee: req.user._id }
+      : {};
+
     const stages = ['new_inquiry', 'contacted', 'negotiation', 'quote_sent', 'advance_pending', 'confirmed', 'completed', 'lost'];
     const kanban = {};
 
-    for (const stage of stages) {
-      kanban[stage] = await Lead.find({ ...filter, leadStatus: stage })
-        .populate('assignedEmployee', 'name avatar')
-        .sort({ updatedAt: -1 })
-        .limit(50);
-    }
+    // Run aggregation for each stage in parallel for performance
+    await Promise.all(stages.map(async (stage) => {
+      const stageFilter = { ...baseFilter, leadStatus: stage };
+      kanban[stage] = await Lead.aggregate(
+        buildSmartPipeline(stageFilter, 0, 100)
+      );
+    }));
 
     res.json({ success: true, data: kanban });
   } catch (err) { next(err); }
