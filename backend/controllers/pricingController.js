@@ -1,5 +1,5 @@
 const PricingConfig = require('../models/PricingConfig');
-const { generateMatrix, calculatePricing, DEFAULT_CONFIG } = require('../utils/pricingEngine');
+const { generateMatrix, calculatePricing, calculateQuotation, DEFAULT_CONFIG } = require('../utils/pricingEngine');
 
 // Helper: get active config or default
 const getActiveConfig = async () => {
@@ -51,8 +51,17 @@ const calculate = async (req, res, next) => {
   try {
     const { pax, days } = req.body;
     const config = await getActiveConfig();
-    const result = calculatePricing(parseInt(pax), parseInt(days), config);
-    res.json({ success: true, data: result });
+
+    const normPax  = parseInt(pax,  10);
+    const normDays = parseInt(days, 10);
+
+    // Legacy flat result (used by TariffMatrix)
+    const legacy = calculatePricing(normPax, normDays, config);
+
+    // Full quotation with Model A + B breakdown
+    const quotation = calculateQuotation(normPax, normDays, config);
+
+    res.json({ success: true, data: { ...legacy, quotation } });
   } catch (err) { next(err); }
 };
 
