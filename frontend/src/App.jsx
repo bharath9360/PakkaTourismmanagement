@@ -1,6 +1,7 @@
-import React from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import React, { useEffect } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import useAuthStore from './store/useAuthStore';
+import { setNavigateFn } from './services/api';
 
 // Layout
 import AppShell from './components/layout/AppShell';
@@ -33,11 +34,37 @@ const ProtectedRoute = ({ children, adminOnly = false }) => {
   return children;
 };
 
+// ── NavigateInjector ────────────────────────────────────────────────────
+// Must be rendered inside <BrowserRouter> so useNavigate() is available.
+// Registers the navigate function with api.js so the 401 interceptor can
+// redirect to /login via React Router instead of a hard page reload.
+function NavigateInjector() {
+  const navigate = useNavigate();
+  const { checkTokenExpiry } = useAuthStore();
+
+  // Wire up React Router navigate to the Axios 401 interceptor
+  useEffect(() => {
+    setNavigateFn(navigate);
+  }, [navigate]);
+
+  // Check token expiry on mount and every 60 seconds
+  useEffect(() => {
+    checkTokenExpiry();
+    const interval = setInterval(checkTokenExpiry, 60_000);
+    return () => clearInterval(interval);
+  }, [checkTokenExpiry]);
+
+  return null; // renders nothing — side-effects only
+}
+
 export default function App() {
   const { isAuthenticated, user } = useAuthStore();
 
   return (
     <BrowserRouter>
+      {/* Inject navigate fn + token expiry watch — must be inside BrowserRouter */}
+      <NavigateInjector />
+
       <Routes>
         {/* Public */}
         <Route path="/login" element={
