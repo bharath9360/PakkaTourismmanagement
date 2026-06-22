@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import useAuthStore from '../../store/useAuthStore';
+import Logo3D from '../../components/Logo3D';
 
 const WORK_MODES = [
   { value: 'office', label: 'In Office', icon: '🏢', desc: 'Working from company premises' },
@@ -294,9 +295,7 @@ export default function LoginPage() {
         {/* Header */}
         <div style={{ marginBottom: '24px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '20px' }}>
-            <div style={{ width: 36, height: 36, borderRadius: 10, background: 'linear-gradient(135deg,#3B82F6,#10B981)', display: 'grid', placeItems: 'center' }}>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="white"><path d="M12 2L20 7V17L12 22L4 17V7L12 2Z"/></svg>
-            </div>
+            <Logo3D size={36} logoUrl={null} pause={true} />
             <div>
               <div style={{ fontSize: '14px', fontWeight: 700, color: '#fff' }}>Pakka Tourism</div>
               <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.3)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>Enterprise Suite</div>

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import useAuthStore from '../../store/useAuthStore';
 import api from '../../services/api';
+import FaceCapture from '../../components/FaceCapture';
 
 /* ─── helpers ─────────────────────────────────────────────────────────────── */
 const fmtTime = (d) => d ? new Date(d).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }) : '—';
@@ -43,6 +44,11 @@ export default function AttendancePage() {
   const [success, setSuccess]     = useState('');
   const [now, setNow]             = useState(new Date());
 
+  // Stored face descriptor for this employee
+  const [storedDescriptor, setStoredDescriptor] = useState(null);
+  const [noFaceRegistered, setNoFaceRegistered] = useState(false);
+  const [showFaceCapture, setShowFaceCapture]   = useState(false);
+
   // History state
   const [history, setHistory]     = useState([]);
   const [historyStats, setHistoryStats] = useState(null);
@@ -78,8 +84,26 @@ export default function AttendancePage() {
   useEffect(() => {
     if (!isAdmin) {
       autoFetchLocation();
+      // Also load employee's stored face descriptor
+      fetchMyDescriptor();
     }
   }, []);
+
+  const fetchMyDescriptor = async () => {
+    try {
+      const { data } = await api.get('/profile/me');
+      const desc = data.data?.faceDescriptor;
+      if (desc && desc.length === 128) {
+        setStoredDescriptor(desc);
+        setNoFaceRegistered(false);
+      } else {
+        setStoredDescriptor(null);
+        setNoFaceRegistered(true);
+      }
+    } catch (err) {
+      console.error('Could not load face descriptor', err);
+    }
+  };
 
   // Load today's record on mount
   useEffect(() => {
@@ -205,18 +229,13 @@ export default function AttendancePage() {
     } finally { setAutoAbsentLoading(false); }
   };
 
-  /* ─── Camera (Face ID simulation) ─────────────────────────────────────── */
-  const startCamera = async () => {
+  /* ─── Camera (Face ID) ─────────────────────────────────────────────────── */
+  // Real face recognition is handled by FaceCapture component.
+  // These stubs remain for legacy references:
+  const startCamera = () => {
     setError('');
+    setShowFaceCapture(true);
     setStep('camera');
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
-      streamRef.current = stream;
-      if (videoRef.current) videoRef.current.srcObject = stream;
-    } catch (err) {
-      setError('Camera access denied. Face verification requires camera permission.');
-      setStep('idle');
-    }
   };
 
   const stopCamera = () => {
@@ -226,29 +245,7 @@ export default function AttendancePage() {
     }
   };
 
-  const runFaceScan = () => {
-    setScanning(true);
-    setStep('face');
-    setScanPct(0);
-    let p = 0;
-    const iv = setInterval(() => {
-      p += Math.random() * 12 + 8;
-      setScanPct(Math.min(p, 100));
-      if (p >= 100) {
-        clearInterval(iv);
-        setFaceVerified(true);
-        stopCamera();
-        // If location already fetched on mount, go straight to work mode
-        setTimeout(() => {
-          if (location) {
-            setStep('mode');
-          } else {
-            setStep('location');
-          }
-        }, 500);
-      }
-    }, 120);
-  };
+  const runFaceScan = () => {}; // unused — FaceCapture handles everything
 
   /* ─── Location ─────────────────────────────────────────────────────────── */
   const autoFetchLocation = useCallback(() => {
@@ -573,55 +570,67 @@ export default function AttendancePage() {
               {/* Step: Idle */}
               {step === 'idle' && (
                 <div style={{ textAlign: 'center' }}>
-                  <div style={{ fontSize: '64px', marginBottom: '12px' }}>👤</div>
-                  <div style={{ fontWeight: 700, fontSize: '16px', marginBottom: '6px' }}>Ready to Check In</div>
-                  <div style={{ fontSize: '13px', color: 'var(--color-text-muted)', marginBottom: '20px' }}>
-                    Step 1 of 4: Face ID verification required
-                  </div>
-                  <button className="btn btn-primary" style={{ width: '100%', justifyContent: 'center', padding: '12px', fontSize: '15px' }}
-                    onClick={startCamera}>
-                    📷 Start Face Verification
-                  </button>
+                  {noFaceRegistered ? (
+                    <div style={{ padding: '24px 16px', background: 'rgba(220,38,38,0.07)', border: '1px solid rgba(220,38,38,0.2)', borderRadius: '14px' }}>
+                      <div style={{ fontSize: '48px', marginBottom: '12px' }}>🚫</div>
+                      <div style={{ fontWeight: 700, fontSize: '15px', color: '#DC2626', marginBottom: '8px' }}>Face Not Registered</div>
+                      <div style={{ fontSize: '13px', color: '#7F1D1D', lineHeight: 1.7 }}>
+                        Your face ID has not been set up yet.<br />
+                        Please contact your Admin to register your face before checking in.
+                      </div>
+                      <div style={{ marginTop: '16px', padding: '10px 14px', background: 'rgba(220,38,38,0.06)', borderRadius: '8px', fontSize: '11px', color: '#DC2626', fontWeight: 600 }}>
+                        Settings → Employee Management → Register Face
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div style={{ fontSize: '64px', marginBottom: '12px' }}>👤</div>
+                      <div style={{ fontWeight: 700, fontSize: '16px', marginBottom: '6px' }}>Ready to Check In</div>
+                      <div style={{ fontSize: '13px', color: 'var(--color-text-muted)', marginBottom: '20px' }}>
+                        Step 1 of 4: Face ID verification required
+                      </div>
+                      {storedDescriptor ? (
+                        <div style={{ padding: '8px 12px', background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(52,211,153,0.25)', borderRadius: '8px', marginBottom: '16px', fontSize: '12px', color: '#059669' }}>
+                          ✅ Face enrolled — biometric match will be performed
+                        </div>
+                      ) : null}
+                      <button className="btn btn-primary" style={{ width: '100%', justifyContent: 'center', padding: '12px', fontSize: '15px' }}
+                        onClick={startCamera}>
+                        📷 Start Face Verification
+                      </button>
+                    </>
+                  )}
                 </div>
               )}
 
-              {/* Step: Camera */}
-              {(step === 'camera' || step === 'face') && (
-                <div style={{ textAlign: 'center' }}>
-                  <div style={{ position: 'relative', marginBottom: '16px' }}>
-                    <video ref={videoRef} autoPlay muted playsInline
-                      style={{ width: '100%', borderRadius: '12px', border: '3px solid var(--color-accent)', maxHeight: '200px', objectFit: 'cover', background: '#000' }} />
-                    {step === 'face' && (
-                      <div style={{
-                        position: 'absolute', inset: 0, borderRadius: '12px',
-                        background: 'rgba(37,99,235,0.15)',
-                        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center'
-                      }}>
-                        <div style={{ width: '120px', height: '120px', border: '3px solid #3B82F6', borderRadius: '50%', marginBottom: '8px', position: 'relative', overflow: 'hidden' }}>
-                          <div style={{ position: 'absolute', top: `${-120 + scanPct * 1.2}px`, left: 0, right: 0, height: '3px', background: 'rgba(59,130,246,0.8)', boxShadow: '0 0 10px #3B82F6', transition: 'top 0.1s linear' }} />
-                        </div>
-                        <div style={{ color: '#fff', fontWeight: 700, fontSize: '13px', textShadow: '0 1px 3px rgba(0,0,0,0.5)' }}>
-                          Scanning… {Math.round(scanPct)}%
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                  {step === 'camera' && (
-                    <>
-                      <div style={{ fontSize: '13px', color: 'var(--color-text-muted)', marginBottom: '16px' }}>
-                        Face centered? Hold still and press scan.
-                      </div>
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                        <button className="btn btn-secondary" onClick={() => { stopCamera(); setStep('idle'); }}>Cancel</button>
-                        <button className="btn btn-primary" onClick={runFaceScan}>🔍 Scan Face</button>
-                      </div>
-                    </>
-                  )}
-                  {step === 'face' && (
-                    <div style={{ fontSize: '13px', color: '#2563EB', fontWeight: 600 }}>
-                      Hold still — verifying identity…
-                    </div>
-                  )}
+              {/* Step: Camera — Real face-api.js capture */}
+              {(step === 'camera' || step === 'face') && showFaceCapture && (
+                <div style={{ background: 'rgba(0,0,0,0.3)', borderRadius: '14px', padding: '16px', border: '1px solid rgba(255,255,255,0.06)' }}>
+                  <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--color-text-muted)', marginBottom: '12px', textAlign: 'center' }}>Step 2: Face Biometric Verification</div>
+                  <FaceCapture
+                    mode="verify"
+                    storedDescriptor={storedDescriptor}
+                    onSuccess={({ matched, distance }) => {
+                      setShowFaceCapture(false);
+                      setFaceVerified(true);
+                      setTimeout(() => {
+                        if (location) {
+                          setStep('mode');
+                        } else {
+                          setStep('location');
+                        }
+                      }, 400);
+                    }}
+                    onError={(msg) => {
+                      setError(msg || 'Face verification failed. Please try again.');
+                      setShowFaceCapture(false);
+                      setStep('idle');
+                    }}
+                    onCancel={() => {
+                      setShowFaceCapture(false);
+                      setStep('idle');
+                    }}
+                  />
                 </div>
               )}
 

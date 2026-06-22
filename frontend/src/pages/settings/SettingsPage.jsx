@@ -4,6 +4,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import useAuthStore from '../../store/useAuthStore';
 import api from '../../services/api';
+import FaceCapture from '../../components/FaceCapture';
 
 // Fix Leaflet default icon issue with Vite/Webpack
 delete L.Icon.Default.prototype._getIconUrl;
@@ -391,9 +392,8 @@ export default function SettingsPage() {
   const [showEditEmployee, setShowEditEmployee] = useState(null);
   const [showFaceReg, setShowFaceReg] = useState(null);
   const [showResetPwd, setShowResetPwd] = useState(null);
-  const [faceRegStage, setFaceRegStage] = useState('idle');
-  const [faceRegPct, setFaceRegPct] = useState(0);
-  const [resetPwdForm, setResetPwdForm] = useState({ password: '', confirm: '' });
+  const [addEmpStep, setAddEmpStep] = useState('details'); // 'details' | 'face'
+  const [faceResult, setFaceResult] = useState(null);      // { descriptor, photoDataUrl }
   const [empMsg, setEmpMsg] = useState('');
 
   // Load real employees on mount
@@ -411,6 +411,7 @@ export default function SettingsPage() {
   const [newEmp, setNewEmp] = useState({
     name:'', email:'', phone:'', password:'', department:'Sales', destination:'Manali, HP'
   });
+  const [resetPwdForm, setResetPwdForm] = useState({ password: '', confirm: '' });
 
   // Settings State
   const [settings, setSettings] = useState({
@@ -476,26 +477,10 @@ export default function SettingsPage() {
     { id: 'integrations', label: '🔗 Integrations' },
   ];
 
-  const startFaceReg = (empId) => {
-    setShowFaceReg(empId);
-    setFaceRegStage('scanning');
-    setFaceRegPct(0);
-    let pct = 0;
-    const interval = setInterval(() => {
-      pct += Math.random() * 8 + 3;
-      setFaceRegPct(Math.min(pct, 100));
-      if (pct >= 100) {
-        clearInterval(interval);
-        setFaceRegStage('captured');
-        setTimeout(() => setFaceRegStage('saved'), 800);
-      }
-    }, 150);
-  };
-
+  const startFaceReg = (empId) => { setShowFaceReg(empId); };
   const saveFaceReg = () => {
-    setEmployees(prev => prev.map(e => e._id === showFaceReg ? { ...e, faceRegistered: true } : e));
+    fetchEmployees(); // refresh to show updated faceRegistered status
     setShowFaceReg(null);
-    setFaceRegStage('idle');
   };
 
   const toggleActive = async (id, currentStatus) => {
@@ -509,11 +494,27 @@ export default function SettingsPage() {
 
   const handleAddEmployee = async () => {
     try {
-      await api.post('/auth/register', { ...newEmp, role: 'employee' });
+      const { data } = await api.post('/auth/register', { ...newEmp, role: 'employee' });
+      const newEmpId = data.data?._id;
+
+      // If face was captured, register it for the new employee
+      if (faceResult && faceResult.descriptor && newEmpId) {
+        try {
+          await api.post(`/profile/${newEmpId}/face-register`, {
+            descriptor: faceResult.descriptor,
+            facePhotoDataUrl: faceResult.photoDataUrl || null,
+          });
+        } catch (faceErr) {
+          console.warn('Face registration failed (employee created):', faceErr);
+        }
+      }
+
       setNewEmp({ name:'', email:'', phone:'', password:'', department:'Sales', destination:'Manali, HP' });
+      setFaceResult(null);
+      setAddEmpStep('details');
       setShowAddEmployee(false);
-      setEmpMsg('✅ Employee created successfully!');
-      setTimeout(() => setEmpMsg(''), 3000);
+      setEmpMsg(faceResult ? '✅ Employee created with Face ID registered!' : '✅ Employee created! Face ID can be registered later.');
+      setTimeout(() => setEmpMsg(''), 4000);
       fetchEmployees();
     } catch (err) {
       setEmpMsg(`❌ ${err.response?.data?.message || 'Failed to create employee'}`);
@@ -654,53 +655,102 @@ export default function SettingsPage() {
             </table>
           </div>
 
-          {/* ADD EMPLOYEE MODAL */}
+          {/* ADD EMPLOYEE MODAL — 2-step: details then face */}
           {showAddEmployee && (
-            <div className="modal-overlay" onClick={() => setShowAddEmployee(false)}>
-              <div className="modal-box" style={{ maxWidth: '560px' }} onClick={e => e.stopPropagation()}>
+            <div className="modal-overlay" onClick={() => { setShowAddEmployee(false); setAddEmpStep('details'); setFaceResult(null); }}>
+              <div className="modal-box" style={{ maxWidth: '580px', background: '#111827' }} onClick={e => e.stopPropagation()}>
                 <div className="modal-header">
-                  <div className="modal-title">👤 Add New Employee</div>
-                  <button className="modal-close" onClick={() => setShowAddEmployee(false)}>×</button>
-                </div>
-                <div className="modal-body">
-                  <div style={{ background: 'var(--color-accent-subtle)', border: '1px solid var(--color-accent-border)', borderRadius: '10px', padding: '10px 14px', marginBottom: '16px', fontSize: '12px', color: 'var(--color-accent)' }}>
-                    🛡️ Employee accounts can only be created by Admin.
+                  <div>
+                    <div className="modal-title">{addEmpStep === 'details' ? '👤 Add New Employee' : '📸 Register Face ID'}</div>
+                    <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '2px' }}>Step {addEmpStep === 'details' ? '1' : '2'} of 2</div>
                   </div>
-                  <div className="form-grid">
-                    <div className="form-group">
-                      <label className="form-label">Full Name *</label>
-                      <input className="form-input" placeholder="Rajesh Kumar" value={newEmp.name} onChange={e => setNewEmp(f => ({ ...f, name: e.target.value }))} />
-                    </div>
-                    <div className="form-group">
-                      <label className="form-label">Email *</label>
-                      <input className="form-input" type="email" placeholder="rajesh@pakkatourism.com" value={newEmp.email} onChange={e => setNewEmp(f => ({ ...f, email: e.target.value }))} />
-                    </div>
-                    <div className="form-group">
-                      <label className="form-label">Phone *</label>
-                      <input className="form-input" placeholder="9876543210" value={newEmp.phone} onChange={e => setNewEmp(f => ({ ...f, phone: e.target.value }))} />
-                    </div>
-                    <div className="form-group">
-                      <label className="form-label">Initial Password *</label>
-                      <input className="form-input" type="password" placeholder="••••••••" value={newEmp.password} onChange={e => setNewEmp(f => ({ ...f, password: e.target.value }))} />
-                    </div>
-                    <div className="form-group">
-                      <label className="form-label">Department</label>
-                      <select className="form-select" value={newEmp.department} onChange={e => setNewEmp(f => ({ ...f, department: e.target.value }))}>
-                        <option>Sales</option><option>Operations</option><option>Finance</option><option>Marketing</option>
-                      </select>
-                    </div>
-                    <div className="form-group">
-                      <label className="form-label">Assigned Destination *</label>
-                      <select className="form-select" value={newEmp.destination} onChange={e => setNewEmp(f => ({ ...f, destination: e.target.value }))}>
-                        {DESTINATIONS.map(d => <option key={d}>{d}</option>)}
-                      </select>
-                    </div>
-                  </div>
+                  <button className="modal-close" onClick={() => { setShowAddEmployee(false); setAddEmpStep('details'); setFaceResult(null); }}>×</button>
                 </div>
-                <div className="modal-footer">
-                  <button className="btn btn-secondary" onClick={() => setShowAddEmployee(false)}>Cancel</button>
-                  <button className="btn btn-primary" onClick={handleAddEmployee} disabled={!newEmp.name || !newEmp.email || !newEmp.password}>👤 Create Employee</button>
-                </div>
+
+                {addEmpStep === 'details' && (
+                  <>
+                    <div className="modal-body">
+                      <div style={{ background: 'var(--color-accent-subtle)', border: '1px solid var(--color-accent-border)', borderRadius: '10px', padding: '10px 14px', marginBottom: '16px', fontSize: '12px', color: 'var(--color-accent)' }}>
+                        🛡️ Employee accounts can only be created by Admin.
+                      </div>
+                      <div className="form-grid">
+                        <div className="form-group">
+                          <label className="form-label">Full Name *</label>
+                          <input className="form-input" placeholder="Rajesh Kumar" value={newEmp.name} onChange={e => setNewEmp(f => ({ ...f, name: e.target.value }))} />
+                        </div>
+                        <div className="form-group">
+                          <label className="form-label">Email *</label>
+                          <input className="form-input" type="email" placeholder="rajesh@pakkatourism.com" value={newEmp.email} onChange={e => setNewEmp(f => ({ ...f, email: e.target.value }))} />
+                        </div>
+                        <div className="form-group">
+                          <label className="form-label">Phone *</label>
+                          <input className="form-input" placeholder="9876543210" value={newEmp.phone} onChange={e => setNewEmp(f => ({ ...f, phone: e.target.value }))} />
+                        </div>
+                        <div className="form-group">
+                          <label className="form-label">Initial Password *</label>
+                          <input className="form-input" type="password" placeholder="••••••••" value={newEmp.password} onChange={e => setNewEmp(f => ({ ...f, password: e.target.value }))} />
+                        </div>
+                        <div className="form-group">
+                          <label className="form-label">Department</label>
+                          <select className="form-select" value={newEmp.department} onChange={e => setNewEmp(f => ({ ...f, department: e.target.value }))}>
+                            <option>Sales</option><option>Operations</option><option>Finance</option><option>Marketing</option>
+                          </select>
+                        </div>
+                        <div className="form-group">
+                          <label className="form-label">Assigned Destination *</label>
+                          <select className="form-select" value={newEmp.destination} onChange={e => setNewEmp(f => ({ ...f, destination: e.target.value }))}>
+                            {DESTINATIONS.map(d => <option key={d}>{d}</option>)}
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="modal-footer">
+                      <button className="btn btn-secondary" onClick={() => setShowAddEmployee(false)}>Cancel</button>
+                      <button className="btn btn-ghost" onClick={() => { if (newEmp.name && newEmp.email && newEmp.password) { handleAddEmployee(); } }}
+                        disabled={!newEmp.name || !newEmp.email || !newEmp.password}
+                        title="Create without face ID — register face later">
+                        Skip Face →  Create
+                      </button>
+                      <button className="btn btn-primary" onClick={() => setAddEmpStep('face')}
+                        disabled={!newEmp.name || !newEmp.email || !newEmp.password}>
+                        📸 Next: Register Face
+                      </button>
+                    </div>
+                  </>
+                )}
+
+                {addEmpStep === 'face' && (
+                  <>
+                    <div className="modal-body">
+                      {faceResult ? (
+                        <div style={{ textAlign: 'center', padding: '16px' }}>
+                          {faceResult.photoDataUrl && (
+                            <img src={faceResult.photoDataUrl} alt="Face capture" style={{ width: 120, height: 120, objectFit: 'cover', borderRadius: '50%', border: '3px solid #10B981', marginBottom: '12px' }} />
+                          )}
+                          <div style={{ fontSize: '15px', fontWeight: 700, color: '#10B981', marginBottom: '8px' }}>✅ Face Captured Successfully!</div>
+                          <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.5)' }}>Face descriptor extracted and ready to save</div>
+                        </div>
+                      ) : (
+                        <FaceCapture
+                          mode="register"
+                          onSuccess={(result) => setFaceResult(result)}
+                          onError={(msg) => setEmpMsg(`⚠️ ${msg}`)}
+                          onCancel={() => setAddEmpStep('details')}
+                        />
+                      )}
+                    </div>
+                    <div className="modal-footer">
+                      <button className="btn btn-ghost" onClick={() => { setFaceResult(null); setAddEmpStep('details'); }}>← Back</button>
+                      {faceResult ? (
+                        <button className="btn btn-success" onClick={handleAddEmployee}>✅ Create Employee with Face ID</button>
+                      ) : (
+                        <button className="btn btn-secondary" onClick={handleAddEmployee} title="Create employee without face registration">
+                          Skip → Create Without Face
+                        </button>
+                      )}
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           )}
@@ -750,59 +800,43 @@ export default function SettingsPage() {
             </div>
           )}
 
-          {/* FACE REGISTRATION MODAL */}
+          {/* FACE REGISTRATION MODAL — Real face-api.js */}
           {showFaceReg && (
-            <div className="modal-overlay" onClick={() => { setShowFaceReg(null); setFaceRegStage('idle'); }}>
-              <div className="modal-box" style={{ maxWidth: '420px', textAlign: 'center' }} onClick={e => e.stopPropagation()}>
+            <div className="modal-overlay" onClick={() => setShowFaceReg(null)}>
+              <div className="modal-box" style={{ maxWidth: '480px', background: '#111827' }} onClick={e => e.stopPropagation()}>
                 <div className="modal-header">
-                  <div className="modal-title">📸 Face ID Registration</div>
-                  <button className="modal-close" onClick={() => { setShowFaceReg(null); setFaceRegStage('idle'); }}>×</button>
-                </div>
-                <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                  <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginBottom: '16px' }}>
-                    Employee: <strong>{employees.find(e => e._id === showFaceReg)?.name}</strong> ({showFaceReg})
-                  </div>
-                  <div style={{
-                    width: '200px', height: '200px', borderRadius: '50%', overflow: 'hidden', position: 'relative',
-                    border: `3px solid ${faceRegStage === 'saved' ? '#10B981' : faceRegStage === 'scanning' ? '#3B82F6' : 'var(--color-border)'}`,
-                    background: 'linear-gradient(135deg, rgba(15,23,42,0.8), rgba(30,41,59,0.8))',
-                    display: 'grid', placeItems: 'center', marginBottom: '16px', transition: 'border-color 0.3s'
-                  }}>
-                    {faceRegStage === 'idle' && <span style={{ fontSize: '48px' }}>👤</span>}
-                    {faceRegStage === 'scanning' && (
-                      <>
-                        <span style={{ fontSize: '48px' }}>🔍</span>
-                        <div style={{ position: 'absolute', top: `${100 - faceRegPct}%`, left: 0, right: 0, height: '2px', background: '#3B82F6', boxShadow: '0 0 8px #3B82F6', transition: 'top 0.1s' }} />
-                      </>
-                    )}
-                    {faceRegStage === 'captured' && <span style={{ fontSize: '48px' }}>📸</span>}
-                    {faceRegStage === 'saved' && <span style={{ fontSize: '48px' }}>✅</span>}
-                  </div>
-                  {faceRegStage === 'scanning' && (
-                    <div style={{ width: '80%', marginBottom: '12px' }}>
-                      <div className="progress-wrap">
-                        <div className="progress-bar progress-blue" style={{ width: `${faceRegPct}%` }} />
-                      </div>
-                      <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '4px' }}>
-                        Capturing facial data… {Math.round(faceRegPct)}%
-                      </div>
+                  <div>
+                    <div className="modal-title">📸 Face ID Registration</div>
+                    <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '2px' }}>
+                      {employees.find(e => e._id === showFaceReg)?.name}
                     </div>
-                  )}
-                  <div style={{ fontSize: '14px', fontWeight: 700, marginBottom: '16px', color: faceRegStage === 'saved' ? '#10B981' : faceRegStage === 'scanning' ? '#3B82F6' : '#64748B' }}>
-                    {faceRegStage === 'idle' && 'Ready to capture face data'}
-                    {faceRegStage === 'scanning' && 'Scanning facial features…'}
-                    {faceRegStage === 'captured' && 'Face captured! Processing…'}
-                    {faceRegStage === 'saved' && '✓ Face ID registered successfully!'}
                   </div>
+                  <button className="modal-close" onClick={() => setShowFaceReg(null)}>×</button>
                 </div>
-                <div className="modal-footer" style={{ justifyContent: 'center' }}>
-                  {faceRegStage === 'saved' ? (
-                    <button className="btn btn-success" onClick={saveFaceReg}>✅ Done — Save Registration</button>
-                  ) : faceRegStage === 'idle' ? (
-                    <button className="btn btn-primary" onClick={() => startFaceReg(showFaceReg)}>📸 Start Face Capture</button>
-                  ) : (
-                    <button className="btn btn-ghost" disabled>Scanning…</button>
-                  )}
+                <div className="modal-body">
+                  <div style={{ background: 'rgba(59,130,246,0.07)', border: '1px solid rgba(96,165,250,0.2)', borderRadius: '10px', padding: '10px 14px', marginBottom: '16px', fontSize: '12px', color: '#93C5FD' }}>
+                    ℹ️ Capture a clear face photo for biometric attendance check-in. The employee must be present in front of camera.
+                  </div>
+                  <FaceCapture
+                    mode="register"
+                    onSuccess={async (result) => {
+                      try {
+                        await api.post(`/profile/${showFaceReg}/face-register`, {
+                          descriptor: result.descriptor,
+                          facePhotoDataUrl: result.photoDataUrl || null,
+                        });
+                        setEmpMsg('✅ Face ID registered successfully!');
+                        setTimeout(() => setEmpMsg(''), 3000);
+                        saveFaceReg();
+                      } catch (err) {
+                        setEmpMsg('❌ Failed to save face data. Please try again.');
+                      }
+                    }}
+                    onError={(msg) => {
+                      setEmpMsg(`⚠️ ${msg}`);
+                    }}
+                    onCancel={() => setShowFaceReg(null)}
+                  />
                 </div>
               </div>
             </div>

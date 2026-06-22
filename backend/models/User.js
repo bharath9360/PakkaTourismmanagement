@@ -18,6 +18,8 @@ const UserSchema = new mongoose.Schema({
   destination:     { type: String },                          // Assigned destination/location
   faceRegistered:  { type: Boolean, default: false },         // Face ID enrolled
   faceRegisteredAt:{ type: Date },                            // When face was registered
+  faceDescriptor:  { type: [Number], default: [] },           // 128-float face embedding vector
+  facePhoto:       { type: String },                          // Thumbnail of registered face
   workMode:        { type: String, enum: ['office', 'wfh'], default: 'office' },
   lastLogin:       { type: Date },
 

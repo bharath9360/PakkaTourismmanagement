@@ -24,6 +24,7 @@ import WhatsappAutomation from './pages/whatsapp/WhatsappAutomation';
 import ExcelExport from './pages/exports/ExcelExport';
 import SettingsPage from './pages/settings/SettingsPage';
 import ProfilePage from './pages/profile/ProfilePage';
+import NotFoundPage from './pages/NotFoundPage';
 
 // Protected Route Wrapper
 const ProtectedRoute = ({ children, adminOnly = false }) => {
@@ -123,8 +124,8 @@ export default function App() {
           } />
         </Route>
 
-        {/* 404 */}
-        <Route path="*" element={<Navigate to="/dashboard" replace />} />
+        {/* 404 — animated not-found page */}
+        <Route path="*" element={<NotFoundPage />} />
       </Routes>
     </BrowserRouter>
   );

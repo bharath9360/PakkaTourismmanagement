@@ -1,6 +1,7 @@
 import React from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import useAuthStore from '../../store/useAuthStore';
+import Logo3D from '../Logo3D';
 
 /* ─── Inline SVG icon helper ────────────────────────────────────────────── */
 const Icon = ({ d, size = 18 }) => (
@@ -96,13 +97,9 @@ export default function Sidebar({ mobileOpen, onMobileClose }) {
 
   return (
     <aside className={`app-sidebar${mobileOpen ? ' sidebar-mobile-open' : ''}`}>
-      {/* ── Brand ─────────────────────────────────────────────────── */}
+      {/* ── Brand ─────────────────────────────────────────────────────── */}
       <div className="sidebar-brand">
-        <div className="sidebar-logo">
-          <svg viewBox="0 0 24 24" fill="white" aria-hidden="true">
-            <path d="M12 2L20 7V17L12 22L4 17V7L12 2Z" />
-          </svg>
-        </div>
+        <Logo3D size={38} logoUrl={user?.companyLogo || null} />
         <div className="sidebar-brand-text">
           <div className="sidebar-brand-name">Pakka Tourism</div>
           <div className="sidebar-brand-sub">Enterprise Suite</div>

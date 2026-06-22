@@ -182,4 +182,51 @@ router.post('/company-logo', protect, adminOnly, upload.single('logo'), async (r
   } catch (err) { next(err); }
 });
 
+// ─── POST /api/profile/face-register — register own face descriptor ───────────
+router.post('/face-register', protect, async (req, res, next) => {
+  try {
+    const { descriptor, facePhotoDataUrl } = req.body;
+    if (!descriptor || !Array.isArray(descriptor) || descriptor.length !== 128) {
+      return res.status(400).json({ success: false, message: 'Invalid face descriptor — must be 128-element array' });
+    }
+
+    const updates = {
+      faceDescriptor: descriptor,
+      faceRegistered: true,
+      faceRegisteredAt: new Date()
+    };
+
+    // If a face photo data URL provided, save it as base64 (small thumbnail)
+    if (facePhotoDataUrl && facePhotoDataUrl.startsWith('data:image')) {
+      updates.facePhoto = facePhotoDataUrl;
+    }
+
+    const user = await User.findByIdAndUpdate(req.user._id, updates, { new: true }).select('-password');
+    res.json({ success: true, data: user, message: 'Face registered successfully!' });
+  } catch (err) { next(err); }
+});
+
+// ─── ADMIN: POST /api/profile/:id/face-register — register employee face ──────
+router.post('/:id/face-register', protect, adminOnly, async (req, res, next) => {
+  try {
+    const { descriptor, facePhotoDataUrl } = req.body;
+    if (!descriptor || !Array.isArray(descriptor) || descriptor.length !== 128) {
+      return res.status(400).json({ success: false, message: 'Invalid face descriptor — must be 128-element array' });
+    }
+
+    const updates = {
+      faceDescriptor: descriptor,
+      faceRegistered: true,
+      faceRegisteredAt: new Date()
+    };
+    if (facePhotoDataUrl && facePhotoDataUrl.startsWith('data:image')) {
+      updates.facePhoto = facePhotoDataUrl;
+    }
+
+    const user = await User.findByIdAndUpdate(req.params.id, updates, { new: true }).select('-password');
+    if (!user) return res.status(404).json({ success: false, message: 'Employee not found' });
+    res.json({ success: true, data: user, message: 'Face registered for employee!' });
+  } catch (err) { next(err); }
+});
+
 module.exports = router;
