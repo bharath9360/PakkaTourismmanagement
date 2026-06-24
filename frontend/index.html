@@ -2,7 +2,6 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover" />
     <meta name="description" content="Pakka Tourism Enterprise CRM + HRMS — AI-powered workforce and travel management platform" />
     <meta name="theme-color" content="#0F172A" />
@@ -10,6 +9,67 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>Pakka Tourism — Enterprise CRM + HRMS</title>
+
+    <!-- ═══════════ PERFORMANCE: DNS Prefetch & Preconnect ═══════════ -->
+    <!-- Connect to Google Fonts CDN early (before browser discovers font CSS) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <!-- Prefetch Render backend so first API call is faster -->
+    <link rel="dns-prefetch" href="https://pakkatourismmanagement.onrender.com" />
+
+    <!-- ═══════════ FONTS: Load from Google CDN (cached globally) ═══════════ -->
+    <!-- Inter font — loaded via CDN so it's cached across sites -->
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+      media="print"
+      onload="this.media='all'"
+    />
+    <!-- Fallback for no-JS -->
+    <noscript>
+      <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" />
+    </noscript>
+
+    <!-- ═══════════ ICON ═══════════ -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/favicon.svg" />
+
+    <!-- ═══════════ CRITICAL CSS: Prevent flash of unstyled content ═══════════ -->
+    <style>
+      /* Critical above-the-fold CSS — inlined to avoid render-blocking */
+      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+      html { font-family: Inter, system-ui, -apple-system, sans-serif; }
+      body {
+        background: #0A0E1A;
+        color: #fff;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+      }
+      /* Loading skeleton shown until React mounts */
+      #root:empty::before {
+        content: '';
+        display: block;
+        position: fixed;
+        inset: 0;
+        background: #0A0E1A;
+      }
+      /* Initial spinner */
+      #root:empty::after {
+        content: '';
+        display: block;
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        width: 36px;
+        height: 36px;
+        border: 3px solid rgba(59,130,246,0.2);
+        border-top-color: #3B82F6;
+        border-radius: 50%;
+        animation: spin 0.7s linear infinite;
+      }
+      @keyframes spin { to { transform: translate(-50%, -50%) rotate(360deg); } }
+    </style>
   </head>
   <body>
     <div id="root"></div>

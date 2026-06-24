@@ -31,6 +31,7 @@ const cookieParser = require('cookie-parser');
 const rateLimit    = require('express-rate-limit');
 const jwt          = require('jsonwebtoken');
 const path         = require('path');
+const compression  = require('compression');
 const User         = require('./models/User');
 const connectDB    = require('./config/db');
 const errorHandler = require('./middleware/errorHandler');
@@ -100,6 +101,19 @@ io.on('connection', (socket) => {
 });
 
 app.set('io', io);
+
+// ─── Compression Middleware (gzip/br) ───────────────────────────────────────
+// Compresses all JSON and static responses automatically
+// Typically reduces API response size by 60–80%
+app.use(compression({
+  level: 6,               // Balance between speed and compression ratio
+  threshold: 1024,        // Only compress responses > 1 KB
+  filter: (req, res) => {
+    // Don't compress responses for multipart uploads
+    if (req.headers['content-type']?.includes('multipart/form-data')) return false;
+    return compression.filter(req, res);
+  },
+}));
 
 // ─── Security Middleware ──────────────────────────────────────────────────────
 
@@ -206,7 +220,24 @@ httpServer.listen(PORT, () => {
   console.log(`   Port:     ${PORT}`);
   console.log(`   API:      http://localhost:${PORT}/api/health`);
   console.log(`   Security: Helmet + Rate-limit + HttpOnly Cookies`);
-  console.log(`   Socket:   enabled (JWT cookie auth)\n`);
+  console.log(`   Socket:   enabled (JWT cookie auth)`);
+  console.log(`   Gzip:     enabled (compression middleware)\n`);
+
+  // ── Self-Ping to prevent Render free-tier cold starts ──────────────────
+  // Render spins down inactive services after 15 min.
+  // Pinging every 14 min keeps the instance warm.
+  if (process.env.NODE_ENV === 'production' && process.env.RENDER_SERVICE_URL) {
+    const PING_URL = `${process.env.RENDER_SERVICE_URL}/api/health`;
+    setInterval(async () => {
+      try {
+        // Use built-in fetch (Node 18+) — no extra dependency
+        await fetch(PING_URL, { method: 'GET', signal: AbortSignal.timeout(8000) });
+        console.log(`[keep-alive] Pinged ${PING_URL}`);
+      } catch (e) {
+        console.warn(`[keep-alive] Ping failed: ${e.message}`);
+      }
+    }, 14 * 60 * 1000); // every 14 minutes
+  }
 });
 
 module.exports = app;
