@@ -61,7 +61,7 @@ export default defineConfig(({ mode }) => ({
           'vendor-pdf':     ['jspdf'],
           'vendor-docx':    ['docx'],
           // Excel export
-          'vendor-excel':   ['xlsx', 'file-saver'],
+          'vendor-excel':   ['file-saver'],
           // Charts
           'vendor-charts':  ['recharts'],
         },
