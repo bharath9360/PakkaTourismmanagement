@@ -50,6 +50,11 @@ const AttendanceSchema = new mongoose.Schema({
   markedBy:        { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   notes:           { type: String },
 
+  // Daily Work Report (submitted at checkout)
+  workReport:      { type: String, maxlength: 2000 }, // tasks completed today
+  remarks:         { type: String, maxlength: 1000 }, // blockers / notes
+  selfRating:      { type: Number, min: 1, max: 10 }, // employee self-productivity rating
+
 }, { timestamps: true });
 
 // One record per employee per day

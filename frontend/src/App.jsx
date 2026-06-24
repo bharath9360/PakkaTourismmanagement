@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import useAuthStore from './store/useAuthStore';
+import useCompanyStore from './store/useCompanyStore';
 import { setNavigateFn } from './services/api';
 
 // Layout
@@ -42,7 +43,8 @@ const ProtectedRoute = ({ children, adminOnly = false }) => {
 // redirect to /login via React Router instead of a hard page reload.
 function NavigateInjector() {
   const navigate = useNavigate();
-  const { checkTokenExpiry } = useAuthStore();
+  const { checkTokenExpiry, isAuthenticated } = useAuthStore();
+  const { fetchCompany, fetched } = useCompanyStore();
 
   // Wire up React Router navigate to the Axios 401 interceptor
   useEffect(() => {
@@ -55,6 +57,13 @@ function NavigateInjector() {
     const interval = setInterval(checkTokenExpiry, 60_000);
     return () => clearInterval(interval);
   }, [checkTokenExpiry]);
+
+  // Fetch company settings (logo, name, etc.) when user is logged in
+  useEffect(() => {
+    if (isAuthenticated && !fetched) {
+      fetchCompany();
+    }
+  }, [isAuthenticated, fetched, fetchCompany]);
 
   return null; // renders nothing — side-effects only
 }

@@ -1,56 +1,46 @@
 /**
- * api.js — Axios instance for Pakka Tourism CRM
- * ═══════════════════════════════════════════════════════════════════════════
+ * api.js — Production-grade Axios instance for Pakka Tourism CRM
+ * ══════════════════════════════════════════════════════════════════════════
  *
- * Task 1 — Request interceptor:
- *   Reads the JWT token from localStorage and attaches
- *   "Authorization: Bearer <token>" to every outgoing request.
- *   Reading from localStorage (not from Zustand state) is intentional —
- *   it avoids importing the store here and creating a circular dependency.
+ * Auth Strategy:
+ *  • Tokens are stored in HttpOnly cookies (set by backend on login)
+ *  • `withCredentials: true` ensures cookies are sent on every request
+ *  • No token stored in localStorage — XSS cannot steal it
  *
- * Task 2 — Response interceptor (401 handler):
- *   On a 401 Unauthorized response:
- *     1. Calls useAuthStore.getState().logout() — clears Zustand + localStorage
- *     2. Redirects to /login using a programmatic navigation helper
- *        that works outside React components (no window.location.href hack
- *        which would destroy client-side router state)
+ * Auto Token Refresh:
+ *  • On 401 with code `TOKEN_EXPIRED`, silently calls /api/auth/refresh
+ *  • Retries the original failed request after refresh
+ *  • If refresh also fails → logout and redirect to /login
+ *  • Concurrent 401s: only ONE refresh call happens; others wait in queue
  *
- * Why we read token from localStorage instead of Zustand:
- *   api.js is a singleton module. If it imported useAuthStore, and
- *   useAuthStore imported api.js, Node's module system would give one of
- *   them an incomplete reference — a classic circular-dependency bug.
- *   Reading localStorage directly is the correct pattern for Axios interceptors.
- *
- * ═══════════════════════════════════════════════════════════════════════════
+ * Circular-dependency note:
+ *  • useAuthStore is imported lazily (dynamic import) inside the interceptor
+ *    to avoid a circular module dependency at load time.
+ * ══════════════════════════════════════════════════════════════════════════
  */
 
 import axios from 'axios';
-import { LS_TOKEN } from '../store/useAuthStore';
 
-// ─── Programmatic navigation helper ───────────────────────────────────────
-// We cannot call useNavigate() outside a React component tree.
-// Instead, we export a mutable `navigate` ref that App.jsx will populate
-// once the BrowserRouter is mounted. api.js then calls navigate() when it
-// needs to redirect on 401. This is the canonical React Router v6 pattern
-// for navigation outside components.
+// ─── Programmatic navigation helper ───────────────────────────────────────────
 export let navigateFn = null;
 export const setNavigateFn = (fn) => { navigateFn = fn; };
 
-// ─── Axios Instance ────────────────────────────────────────────────────────
+// ─── Axios instance ───────────────────────────────────────────────────────────
 const api = axios.create({
-  baseURL: '/api',
-  headers: { 'Content-Type': 'application/json' },
-  timeout: 30_000,   // 30s — prevents hanging requests
+  baseURL:         '/api',
+  withCredentials: true,    // ← Sends HttpOnly cookies automatically
+  headers:         { 'Content-Type': 'application/json' },
+  timeout:         30_000,
 });
 
-// ─── REQUEST INTERCEPTOR — Attach JWT Bearer token ─────────────────────────
+// ─── REQUEST INTERCEPTOR ──────────────────────────────────────────────────────
+// Cookies are sent automatically via withCredentials.
+// We still support a fallback Authorization header for API/mobile clients
+// that store the token in localStorage (backward compat).
 api.interceptors.request.use(
   (config) => {
-    // Always read fresh from localStorage so that:
-    //  (a) we pick up new tokens after a silent refresh, and
-    //  (b) we avoid the circular-import problem
-    const token = localStorage.getItem(LS_TOKEN);
-    if (token) {
+    const token = localStorage.getItem('pt_token');
+    if (token && !config.headers.Authorization) {
       config.headers.Authorization = `Bearer ${token}`;
     }
     return config;
@@ -58,9 +48,21 @@ api.interceptors.request.use(
   (error) => Promise.reject(error),
 );
 
-// ─── RESPONSE INTERCEPTOR — Handle 401 Unauthorized globally ───────────────
-// De-duplication flag: if a 401 logout is already in progress, don't run it
-// again for concurrent in-flight requests that also come back as 401.
+// ─── Token refresh queue ──────────────────────────────────────────────────────
+// If multiple requests get 401 simultaneously, only ONE refresh call should
+// happen. Others wait in this queue and retry after the first refresh completes.
+let isRefreshing    = false;
+let refreshQueue    = [];   // Array of { resolve, reject }
+
+function processQueue(error = null, token = null) {
+  refreshQueue.forEach(({ resolve, reject }) => {
+    if (error) reject(error);
+    else       resolve(token);
+  });
+  refreshQueue = [];
+}
+
+// ─── RESPONSE INTERCEPTOR ─────────────────────────────────────────────────────
 let isLoggingOut = false;
 
 api.interceptors.response.use(
@@ -69,94 +71,124 @@ api.interceptors.response.use(
 
   // ── Error handler ──
   async (error) => {
-    const status = error.response?.status;
+    const originalRequest = error.config;
+    const status          = error.response?.status;
+    const code            = error.response?.data?.code;
 
-    if (status === 401 && !isLoggingOut) {
-      isLoggingOut = true;
+    // ── Auto-refresh on TOKEN_EXPIRED ──────────────────────────────────────
+    // Only attempt refresh if:
+    //  • 401 response
+    //  • Backend says TOKEN_EXPIRED
+    //  • We haven't already retried this exact request
+    //  • We're not currently logging out
+    if (
+      status === 401 &&
+      code   === 'TOKEN_EXPIRED' &&
+      !originalRequest._retried &&
+      !isLoggingOut
+    ) {
+      originalRequest._retried = true;
 
-      // 1. Import the store lazily to avoid a top-level circular dependency.
-      //    Dynamic import() resolves AFTER both modules have fully loaded.
-      const { default: useAuthStore } = await import('../store/useAuthStore');
-
-      // 2. Clear Zustand state AND localStorage
-      useAuthStore.getState().logout();
-
-      // 3. Navigate to /login via React Router (preserves SPA state)
-      //    Falls back to hard redirect only if navigateFn wasn't set yet
-      //    (e.g., a very early request before App mounts)
-      if (navigateFn) {
-        navigateFn('/login', { replace: true });
-      } else {
-        window.location.href = '/login';
+      if (isRefreshing) {
+        // Another refresh is in progress — queue this request
+        return new Promise((resolve, reject) => {
+          refreshQueue.push({ resolve, reject });
+        }).then(() => api(originalRequest))
+          .catch((err) => Promise.reject(err));
       }
 
-      // Reset flag after a short delay so future logins work correctly
-      setTimeout(() => { isLoggingOut = false; }, 2000);
+      isRefreshing = true;
+
+      try {
+        // Call refresh endpoint — backend sets new cookies automatically
+        const { data } = await axios.post('/api/auth/refresh', {}, {
+          withCredentials: true,
+        });
+
+        // If backend also returns token in body (legacy support), persist it
+        if (data.token) {
+          localStorage.setItem('pt_token', data.token);
+          // Update user in localStorage if returned
+          if (data.user) localStorage.setItem('pt_user', JSON.stringify(data.user));
+        }
+
+        processQueue(null, data.token);
+        isRefreshing = false;
+
+        // Retry the original request
+        return api(originalRequest);
+
+      } catch (refreshError) {
+        processQueue(refreshError);
+        isRefreshing = false;
+
+        // Refresh failed → force logout
+        await performLogout();
+        return Promise.reject(refreshError);
+      }
+    }
+
+    // ── Hard 401 (not expired — invalid/revoked) ───────────────────────────
+    if (status === 401 && !isLoggingOut && !originalRequest._retried) {
+      await performLogout();
     }
 
     return Promise.reject(error);
   },
 );
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Blob download helper — creates a hidden <a> tag, triggers click, then cleans up
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── Logout helper ────────────────────────────────────────────────────────────
+async function performLogout() {
+  if (isLoggingOut) return;
+  isLoggingOut = true;
+
+  try {
+    const { default: useAuthStore } = await import('../store/useAuthStore');
+    useAuthStore.getState().logout();
+  } catch (_) {}
+
+  if (navigateFn) {
+    navigateFn('/login', { replace: true });
+  } else {
+    window.location.href = '/login';
+  }
+
+  setTimeout(() => { isLoggingOut = false; }, 3000);
+}
+
+// ─── File download helpers ────────────────────────────────────────────────────
+
 function triggerBlobDownload(blob, filename) {
   const objectUrl = window.URL.createObjectURL(blob);
   const anchor    = document.createElement('a');
-  anchor.href           = objectUrl;
-  anchor.download       = filename;
-  anchor.style.display  = 'none';
+  anchor.href          = objectUrl;
+  anchor.download      = filename;
+  anchor.style.display = 'none';
   document.body.appendChild(anchor);
   anchor.click();
-  // Revoke after a tick so the browser has time to start the download
   setTimeout(() => {
     window.URL.revokeObjectURL(objectUrl);
     document.body.removeChild(anchor);
   }, 100);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// GET-based file download
-//
-// Usage:
-//   import { downloadFile } from '../../services/api';
-//   await downloadFile('/exports/leads', 'Leads.xlsx', { from, to });
-// ─────────────────────────────────────────────────────────────────────────────
 export async function downloadFile(endpoint, filename, params = {}) {
-  const response = await api.get(endpoint, {
-    params,
-    responseType: 'blob',   // Critical — tells Axios NOT to parse as JSON/text
-  });
-
-  // Honour server-provided filename from Content-Disposition header
-  const cd = response.headers['content-disposition'];
+  const response = await api.get(endpoint, { params, responseType: 'blob' });
+  const cd       = response.headers['content-disposition'];
   if (cd) {
-    const match = cd.match(/filename[^;=\n]*=['"]?([^'";\n]+)['"]?/);
+    const match = cd.match(/filename[^;=\n]*=['"](.*?)['"]/);
     if (match?.[1]) filename = match[1].trim();
   }
-
   triggerBlobDownload(response.data, filename);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// POST-based file download (for endpoints that need a request body)
-//
-// Usage:
-//   import { downloadFilePost } from '../../services/api';
-//   await downloadFilePost('/exports/custom', 'Report.xlsx', { ids: [...] });
-// ─────────────────────────────────────────────────────────────────────────────
 export async function downloadFilePost(endpoint, filename, body = {}) {
-  const response = await api.post(endpoint, body, {
-    responseType: 'blob',
-  });
-
-  const cd = response.headers['content-disposition'];
+  const response = await api.post(endpoint, body, { responseType: 'blob' });
+  const cd       = response.headers['content-disposition'];
   if (cd) {
-    const match = cd.match(/filename[^;=\n]*=['"]?([^'";\n]+)['"]?/);
+    const match = cd.match(/filename[^;=\n]*=['"](.*?)['"]/);
     if (match?.[1]) filename = match[1].trim();
   }
-
   triggerBlobDownload(response.data, filename);
 }
 

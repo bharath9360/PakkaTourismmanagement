@@ -3,6 +3,8 @@ import { useParams } from 'react-router-dom';
 import api from '../../services/api';
 import useAuthStore from '../../store/useAuthStore';
 
+const API_BASE = `http://${window.location.hostname}:5000`;
+
 const DOC_TYPES = [
   { value: 'aadhaar',     label: '🪪 Aadhaar Card',    color: '#F97316' },
   { value: 'pan',         label: '💳 PAN Card',        color: '#8B5CF6' },
@@ -14,7 +16,7 @@ const BLOOD_GROUPS = ['A+','A-','B+','B-','AB+','AB-','O+','O-'];
 
 export default function ProfilePage() {
   const { id } = useParams();
-  const { user: authUser } = useAuthStore();
+  const { user: authUser, updateUser } = useAuthStore();
   const isOwnProfile = !id || id === authUser?._id;
   const isAdmin = authUser?.role === 'admin';
 
@@ -72,7 +74,11 @@ export default function ProfilePage() {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
       setProfile(data.data);
-      setMsg('✅ Photo uploaded!');
+      // Sync to auth store so Topbar photo updates immediately
+      if (isOwnProfile && data.data?.profilePhoto) {
+        updateUser({ profilePhoto: data.data.profilePhoto });
+      }
+      setMsg('Photo uploaded!');
       setTimeout(() => setMsg(''), 3000);
     } catch (err) {
       setMsg(`❌ Upload failed: ${err.response?.data?.message || err.message}`);
@@ -144,7 +150,7 @@ export default function ProfilePage() {
   ];
 
   const avatarUrl = profile.profilePhoto
-    ? `${window.location.protocol}//${window.location.hostname}:5000${profile.profilePhoto}`
+    ? (profile.profilePhoto.startsWith('http') ? profile.profilePhoto : `${API_BASE}${profile.profilePhoto}`)
     : null;
 
   return (

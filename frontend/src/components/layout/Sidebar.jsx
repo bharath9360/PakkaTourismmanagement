@@ -1,6 +1,7 @@
 import React from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import useAuthStore from '../../store/useAuthStore';
+import useCompanyStore from '../../store/useCompanyStore';
 import Logo3D from '../Logo3D';
 
 /* ─── Inline SVG icon helper ────────────────────────────────────────────── */
@@ -86,6 +87,7 @@ const AVATAR_COLORS = { admin: '#2563EB', employee: '#10B981' };
 /* ─── Sidebar component ──────────────────────────────────────────────────── */
 export default function Sidebar({ mobileOpen, onMobileClose }) {
   const { user, logout } = useAuthStore();
+  const { logoUrl } = useCompanyStore();
   const navigate = useNavigate();
 
   const canSee = (roles) => roles.includes('all') || roles.includes(user?.role);
@@ -99,7 +101,7 @@ export default function Sidebar({ mobileOpen, onMobileClose }) {
     <aside className={`app-sidebar${mobileOpen ? ' sidebar-mobile-open' : ''}`}>
       {/* ── Brand ─────────────────────────────────────────────────────── */}
       <div className="sidebar-brand">
-        <Logo3D size={38} logoUrl={user?.companyLogo || null} />
+        <Logo3D size={38} logoUrl={logoUrl} />
         <div className="sidebar-brand-text">
           <div className="sidebar-brand-name">Pakka Tourism</div>
           <div className="sidebar-brand-sub">Enterprise Suite</div>

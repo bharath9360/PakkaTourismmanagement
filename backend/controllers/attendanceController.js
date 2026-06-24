@@ -137,12 +137,13 @@ const checkIn = async (req, res, next) => {
 const checkOut = async (req, res, next) => {
   try {
     const today = getTodayDate();
-    const now = new Date();
+    const now   = new Date();
+    const { workReport, remarks, selfRating } = req.body;
 
     const record = await Attendance.findOne({ employeeId: req.user._id, date: today });
-    if (!record) return res.status(404).json({ success: false, message: 'No check-in found for today' });
-    if (!record.checkInTime) return res.status(400).json({ success: false, message: 'Must check in before checking out' });
-    if (record.checkOutTime) return res.status(400).json({ success: false, message: 'Already checked out for today' });
+    if (!record)           return res.status(404).json({ success: false, message: 'No check-in found for today' });
+    if (!record.checkInTime)  return res.status(400).json({ success: false, message: 'Must check in before checking out' });
+    if (record.checkOutTime)  return res.status(400).json({ success: false, message: 'Already checked out for today' });
 
     record.checkOutTime = now;
     const ms = now - record.checkInTime;
@@ -153,10 +154,38 @@ const checkOut = async (req, res, next) => {
       record.attendanceStatus = 'half_day';
     }
 
+    // Save daily work report fields
+    if (workReport)  record.workReport  = workReport.trim().substring(0, 2000);
+    if (remarks)     record.remarks     = remarks.trim().substring(0, 1000);
+    if (selfRating)  record.selfRating  = Math.min(10, Math.max(1, Number(selfRating)));
+
     await record.save();
+
+    // Notify admin about checkout + work report
+    const admins = await User.find({ role: 'admin', isActive: true });
+    for (const admin of admins) {
+      const notif = await Notification.create({
+        recipient:  admin._id,
+        type:       'attendance_marked',
+        title:      'Employee Checked Out',
+        message:    `${req.user.name} checked out at ${now.toLocaleTimeString('en-IN')} (${fmtHours(record.hoursWorked)}). Rating: ${record.selfRating || '—'}/10`,
+        actionUrl:  '/attendance'
+      });
+      const io = req.app.get('io');
+      if (io) io.to(`user_${admin._id}`).emit('notification', notif);
+    }
+
     res.json({ success: true, data: record });
   } catch (err) { next(err); }
 };
+
+function fmtHours(h) {
+  if (!h) return '0h 0m';
+  const hrs = Math.floor(h);
+  const min = Math.round((h - hrs) * 60);
+  return `${hrs}h ${min}m`;
+}
+
 
 // ─── GET /api/attendance/ ────────────────────────────────────────────────────
 const getMyAttendance = async (req, res, next) => {

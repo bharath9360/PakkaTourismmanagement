@@ -6,6 +6,10 @@ const ItinerarySchema = new mongoose.Schema({
   days:        { type: Number, required: true },
   booking:     { type: mongoose.Schema.Types.ObjectId, ref: 'Booking' },
 
+  clientName:  { type: String },
+  clientPhone: { type: String },
+  totalPrice:  { type: String },
+
   // Day-wise plan
   dayPlans: [{
     dayNumber:   { type: Number, required: true },

@@ -221,14 +221,24 @@ export default function Topbar({ onMenuToggle, mobileOpen }) {
           )}
         </div>
 
-        {/* User Avatar */}
+        {/* User Avatar — shows profile photo if available */}
         <div
-          className="avatar avatar-blue"
-          style={{ background: roleColor, cursor: 'pointer' }}
-          onClick={() => navigate('/settings')}
+          onClick={() => navigate('/profile')}
           title={`${user?.name} — ${user?.role}`}
+          style={{
+            width: 34, height: 34, borderRadius: '50%', cursor: 'pointer',
+            border: `2px solid ${roleColor}`,
+            background: user?.profilePhoto
+              ? `url(${user.profilePhoto.startsWith('http') ? user.profilePhoto : `http://${window.location.hostname}:5000${user.profilePhoto}`}) center/cover no-repeat`
+              : roleColor,
+            display: 'grid', placeItems: 'center',
+            color: '#fff', fontWeight: 800, fontSize: '13px', flexShrink: 0,
+            transition: 'transform 0.15s, box-shadow 0.15s',
+          }}
+          onMouseEnter={e => { e.currentTarget.style.transform = 'scale(1.08)'; e.currentTarget.style.boxShadow = `0 0 0 3px ${roleColor}40`; }}
+          onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.boxShadow = 'none'; }}
         >
-          {(user?.name || 'U')[0].toUpperCase()}
+          {!user?.profilePhoto && (user?.name || 'U')[0].toUpperCase()}
         </div>
       </div>
     </header>

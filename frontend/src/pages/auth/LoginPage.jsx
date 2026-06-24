@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import useAuthStore from '../../store/useAuthStore';
+import useCompanyStore from '../../store/useCompanyStore';
 import Logo3D from '../../components/Logo3D';
 
 const WORK_MODES = [
@@ -42,6 +43,12 @@ const LoginInput = ({ label, type = 'text', value, onChange, placeholder, autoFo
 export default function LoginPage() {
   const navigate = useNavigate();
   const { login, loading, error } = useAuthStore();
+  const { logoUrl, fetchCompany } = useCompanyStore();
+
+  // Fetch company settings (logo etc.) even before login
+  useEffect(() => {
+    fetchCompany();
+  }, [fetchCompany]);
 
   // ── Role tab state ──
   const [loginRole, setLoginRole] = useState('admin'); // 'admin' | 'employee'
@@ -295,7 +302,7 @@ export default function LoginPage() {
         {/* Header */}
         <div style={{ marginBottom: '24px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '20px' }}>
-            <Logo3D size={36} logoUrl={null} pause={true} />
+            <Logo3D size={36} logoUrl={logoUrl} pause={true} />
             <div>
               <div style={{ fontSize: '14px', fontWeight: 700, color: '#fff' }}>Pakka Tourism</div>
               <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.3)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>Enterprise Suite</div>

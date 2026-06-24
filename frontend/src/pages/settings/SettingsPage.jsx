@@ -3,6 +3,7 @@ import { MapContainer, TileLayer, Marker, Popup, useMapEvents, Circle } from 're
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import useAuthStore from '../../store/useAuthStore';
+import useCompanyStore from '../../store/useCompanyStore';
 import api from '../../services/api';
 import FaceCapture from '../../components/FaceCapture';
 
@@ -385,6 +386,7 @@ function GeoFenceTab() {
 // ─── Main Settings Page ───────────────────────────────────────────────────────
 export default function SettingsPage() {
   const { user } = useAuthStore();
+  const { refreshCompany } = useCompanyStore();
   const [activeTab, setActiveTab] = useState('employees');
   const [employees, setEmployees] = useState([]);
   const [empLoading, setEmpLoading] = useState(false);
@@ -447,10 +449,13 @@ export default function SettingsPage() {
     try {
       const formData = new FormData();
       formData.append('logo', file);
-      const { data } = await api.post('/profile/company-logo', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+      // Use the correct settings upload endpoint
+      const { data } = await api.post('/settings/upload-logo', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
       setSettings(s => ({ ...s, companyLogo: data.url }));
-      alert('✅ Logo uploaded successfully!');
-    } catch (err) { alert('❌ Logo upload failed'); }
+      // Refresh global company store so logo updates everywhere (Sidebar, LoginPage, etc.)
+      await refreshCompany();
+      alert('✅ Logo uploaded successfully! It will now appear across all pages.');
+    } catch (err) { alert('❌ Logo upload failed: ' + (err.response?.data?.message || err.message)); }
     finally { setLogoUploading(false); }
   };
 
@@ -1013,7 +1018,12 @@ export default function SettingsPage() {
               <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '10px' }}>
                 <div style={{ width: '80px', height: '80px', borderRadius: '12px', background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', overflow: 'hidden', display: 'grid', placeItems: 'center', flexShrink: 0 }}>
                   {settings.companyLogo ? (
-                    <img src={`${window.location.protocol}//${window.location.hostname}:5000${settings.companyLogo}`} alt="Company Logo" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+                    <img
+                      src={settings.companyLogo.startsWith('http') ? settings.companyLogo : `${window.location.protocol}//${window.location.hostname}:5000${settings.companyLogo}`}
+                      alt="Company Logo"
+                      style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+                      onError={e => { e.target.style.display = 'none'; }}
+                    />
                   ) : (
                     <span style={{ fontSize: '24px' }}>🏢</span>
                   )}

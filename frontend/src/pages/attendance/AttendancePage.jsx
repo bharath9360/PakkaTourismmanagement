@@ -44,6 +44,10 @@ export default function AttendancePage() {
   const [success, setSuccess]     = useState('');
   const [now, setNow]             = useState(new Date());
 
+  // Work Report (shown at checkout)
+  const [showWorkReport, setShowWorkReport] = useState(false);
+  const [workReport, setWorkReport] = useState({ tasks: '', remarks: '', rating: 5 });
+
   // Stored face descriptor for this employee
   const [storedDescriptor, setStoredDescriptor] = useState(null);
   const [noFaceRegistered, setNoFaceRegistered] = useState(false);
@@ -316,15 +320,29 @@ export default function AttendancePage() {
   };
 
   /* ─── Check Out ────────────────────────────────────────────────────────── */
+  // Step 1: Show work report modal before actually checking out
+  const initiateCheckOut = () => setShowWorkReport(true);
+
+  // Step 2: Submit work report + checkout together
   const handleCheckOut = async () => {
+    if (!workReport.tasks.trim()) {
+      setError('Please describe your work done today before checking out.');
+      return;
+    }
     setCheckOutLoading(true);
     setError('');
+    setShowWorkReport(false);
     try {
-      const { data } = await api.post('/attendance/checkout');
+      const { data } = await api.post('/attendance/checkout', {
+        workReport: workReport.tasks.trim(),
+        remarks:    workReport.remarks.trim(),
+        selfRating: workReport.rating,
+      });
       setTodayRecord(data.data);
       setCheckedOut(true);
-      setSuccess(`✅ Checked out! Total: ${fmtHours(data.data.hoursWorked)}`);
-      setTimeout(() => setSuccess(''), 5000);
+      setWorkReport({ tasks: '', remarks: '', rating: 5 });
+      setSuccess(`Checked out! Total: ${fmtHours(data.data.hoursWorked)}`);
+      setTimeout(() => setSuccess(''), 6000);
     } catch (err) {
       setError(err.response?.data?.message || 'Check-out failed.');
     } finally {
@@ -543,6 +561,12 @@ export default function AttendancePage() {
                       <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginBottom: '4px' }}>CHECK OUT</div>
                       <div style={{ fontSize: '18px', fontWeight: 700, color: 'var(--color-danger)' }}>
                         {checkedOut ? fmtTime(todayRecord.checkOutTime) : '—'}
+                        {!checkedOut && (
+                          <button className="btn btn-danger" style={{ width: '100%', justifyContent: 'center', padding: '12px', fontSize: '15px' }}
+                            onClick={initiateCheckOut} disabled={checkOutLoading}>
+                            {checkOutLoading ? 'Processing...' : 'Check Out + Submit Work Report'}
+                          </button>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -553,19 +577,20 @@ export default function AttendancePage() {
                     </span>
                     <span className={`badge ${STATUS_BADGE[todayRecord.attendanceStatus]?.cls}`}>{STATUS_BADGE[todayRecord.attendanceStatus]?.label}</span>
                   </div>
-                  {!checkedOut && (
-                    <button className="btn btn-danger" style={{ width: '100%', justifyContent: 'center', padding: '12px', fontSize: '15px' }}
-                      onClick={handleCheckOut} disabled={checkOutLoading}>
-                      {checkOutLoading ? '⟳ Processing…' : '🔴 Check Out'}
-                    </button>
-                  )}
                   {checkedOut && todayRecord.hoursWorked > 0 && (
                     <div style={{ padding: '12px', background: 'var(--color-bg-secondary)', borderRadius: '10px', textAlign: 'center', fontSize: '13px' }}>
-                      ⏱️ Total Hours: <strong>{fmtHours(todayRecord.hoursWorked)}</strong>
+                      Total: <strong>{fmtHours(todayRecord.hoursWorked)}</strong>
+                    </div>
+                  )}
+                  {checkedOut && todayRecord.workReport && (
+                    <div style={{ marginTop: '10px', padding: '10px 14px', background: 'rgba(37,99,235,0.06)', borderRadius: '10px', textAlign: 'left', fontSize: '12px', border: '1px solid rgba(37,99,235,0.15)' }}>
+                      <div style={{ fontWeight: 700, color: 'var(--color-accent)', marginBottom: '4px' }}>Today's Work Report</div>
+                      <div style={{ color: 'var(--color-text-primary)', lineHeight: 1.6 }}>{todayRecord.workReport}</div>
                     </div>
                   )}
                 </div>
               )}
+
 
               {/* Step: Idle */}
               {step === 'idle' && (
@@ -1051,6 +1076,104 @@ export default function AttendancePage() {
             <div className="modal-footer">
               <button className="btn btn-secondary" onClick={() => setManualModal(false)}>Cancel</button>
               <button className="btn btn-primary" onClick={handleManualMark} disabled={!manualForm.employeeId || !manualForm.date}>💾 Save</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ══ WORK REPORT MODAL (shown on checkout) ══════════════════════════ */}
+      {showWorkReport && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 300,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px'
+        }}>
+          <div style={{
+            background: 'var(--color-bg-elevated)', borderRadius: '20px',
+            boxShadow: 'var(--shadow-xl)', width: '100%', maxWidth: '520px',
+            border: '1px solid var(--color-border)', overflow: 'hidden'
+          }}>
+            {/* Header */}
+            <div style={{ padding: '20px 24px 16px', borderBottom: '1px solid var(--color-border)', background: 'linear-gradient(135deg,rgba(37,99,235,0.08),rgba(124,58,237,0.06))' }}>
+              <div style={{ fontSize: '20px', fontWeight: 800, marginBottom: '4px' }}>Daily Work Report</div>
+              <div style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>
+                {new Date().toLocaleDateString('en-IN', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })}
+              </div>
+            </div>
+
+            {/* Body */}
+            <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+
+              {/* Worked hours preview */}
+              {todayRecord?.checkInTime && (
+                <div style={{ display: 'flex', gap: '12px' }}>
+                  <div style={{ flex: 1, padding: '10px 14px', background: 'var(--color-bg-secondary)', borderRadius: '10px', textAlign: 'center' }}>
+                    <div style={{ fontSize: '10px', color: 'var(--color-text-muted)', fontWeight: 600, marginBottom: '2px' }}>CHECK IN</div>
+                    <div style={{ fontSize: '16px', fontWeight: 700, color: 'var(--color-success)' }}>{fmtTime(todayRecord.checkInTime)}</div>
+                  </div>
+                  <div style={{ flex: 1, padding: '10px 14px', background: 'var(--color-bg-secondary)', borderRadius: '10px', textAlign: 'center' }}>
+                    <div style={{ fontSize: '10px', color: 'var(--color-text-muted)', fontWeight: 600, marginBottom: '2px' }}>CHECK OUT</div>
+                    <div style={{ fontSize: '16px', fontWeight: 700, color: 'var(--color-danger)' }}>{new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false })}</div>
+                  </div>
+                </div>
+              )}
+
+              {/* Tasks done */}
+              <div className="form-group">
+                <label className="form-label" style={{ fontWeight: 700 }}>
+                  What did you work on today? <span style={{ color: 'var(--color-danger)' }}>*</span>
+                </label>
+                <textarea
+                  className="form-textarea"
+                  rows={4}
+                  placeholder="e.g.&#10;- Followed up with 5 leads&#10;- Created 2 itineraries for Rajasthan tour&#10;- Attended team meeting&#10;- Updated CRM records"
+                  value={workReport.tasks}
+                  onChange={e => setWorkReport(r => ({ ...r, tasks: e.target.value }))}
+                  style={{ fontSize: '13px', lineHeight: 1.7 }}
+                />
+                {!workReport.tasks.trim() && (
+                  <div style={{ fontSize: '11px', color: 'var(--color-danger)', marginTop: '4px' }}>Required — please describe your work before checking out</div>
+                )}
+              </div>
+
+              {/* Remarks */}
+              <div className="form-group">
+                <label className="form-label">Remarks / Blockers (optional)</label>
+                <textarea
+                  className="form-textarea"
+                  rows={2}
+                  placeholder="Any blockers, pending items, or notes for tomorrow..."
+                  value={workReport.remarks}
+                  onChange={e => setWorkReport(r => ({ ...r, remarks: e.target.value }))}
+                  style={{ fontSize: '13px' }}
+                />
+              </div>
+
+              {/* Self rating */}
+              <div className="form-group">
+                <label className="form-label">Self-Productivity Rating — <strong>{workReport.rating}/10</strong></label>
+                <input
+                  type="range" min={1} max={10} step={1}
+                  value={workReport.rating}
+                  onChange={e => setWorkReport(r => ({ ...r, rating: Number(e.target.value) }))}
+                  style={{ width: '100%', accentColor: 'var(--color-accent)' }}
+                />
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: 'var(--color-text-muted)' }}>
+                  <span>1 — Low</span><span>5 — Average</span><span>10 — Excellent</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div style={{ padding: '16px 24px', borderTop: '1px solid var(--color-border)', display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+              <button className="btn btn-secondary" onClick={() => setShowWorkReport(false)}>Cancel</button>
+              <button
+                className="btn btn-danger"
+                onClick={handleCheckOut}
+                disabled={!workReport.tasks.trim() || checkOutLoading}
+                style={{ minWidth: '160px', justifyContent: 'center' }}
+              >
+                {checkOutLoading ? 'Submitting...' : 'Submit & Check Out'}
+              </button>
             </div>
           </div>
         </div>
