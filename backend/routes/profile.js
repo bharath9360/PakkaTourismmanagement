@@ -1,5 +1,4 @@
 const router  = require('express').Router();
-const path    = require('path');
 const { protect, adminOnly } = require('../middleware/authMiddleware');
 const User    = require('../models/User');
 const {
@@ -8,16 +7,6 @@ const {
   uploadCompanyLogo,
   deleteFile,
 } = require('../middleware/uploadMiddleware');
-
-  if (ext && mime) cb(null, true);
-  else cb(new Error('Only images (JPEG/PNG/WebP) and documents (PDF/DOC) are allowed'));
-};
-
-const upload = multer({
-  storage,
-  fileFilter,
-  limits: { fileSize: 5 * 1024 * 1024 } // 5MB max
-});
 
 // ─── GET /api/profile/me ──────────────────────────────────────────────────────
 router.get('/me', protect, async (req, res, next) => {

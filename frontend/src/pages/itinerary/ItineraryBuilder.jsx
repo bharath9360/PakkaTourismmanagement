@@ -1151,10 +1151,6 @@ export default function ItineraryBuilder() {
           style={{ minWidth: 0, overflow: 'hidden' }}
           className={`itinerary-right-panel${!showPreview ? ' mobile-hidden' : ''}`}
         >
-          {/* Show right panel always on desktop; on mobile only when preview=true */}
-          <div style={{ display: 'block' }}>
-          {/* OVERRIDE: always show right panel — hide via CSS only */}
-          </div>
           {!showPreview ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
 

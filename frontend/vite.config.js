@@ -90,13 +90,6 @@ export default defineConfig(({ mode }) => ({
           if (id.includes('node_modules/html2canvas/')) return 'vendor-canvas';
         },
       },
-
-      // Tree-shake — remove unused exports from bundled libs
-      treeshake: {
-        moduleSideEffects: false,
-        propertyReadSideEffects: false,
-        tryCatchDeoptimization: false,
-      },
     },
 
     // Warn if any single chunk exceeds 600 kB (helps catch bloat)
