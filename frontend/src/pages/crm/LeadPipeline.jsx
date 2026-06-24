@@ -659,11 +659,17 @@ export default function LeadPipeline() {
     if (!addForm.customerName || !addForm.mobileNumber || !addForm.destination) return;
     setAddLoading(true);
     try {
-      await api.post('/leads', { ...addForm, totalPax: parseInt(addForm.adults || 1) + parseInt(addForm.children || 0) });
+      const payload = { ...addForm, totalPax: parseInt(addForm.adults || 1) + parseInt(addForm.children || 0) };
+      if (!payload.assignedEmployee) delete payload.assignedEmployee;
+      if (!payload.travelDate) delete payload.travelDate;
+      if (!payload.followUpDate) delete payload.followUpDate;
+      if (!payload.budget) payload.budget = 0;
+      
+      await api.post('/leads', payload);
       setShowAdd(false);
       setAddForm({ customerName: '', mobileNumber: '', destination: '', travelDate: '', adults: 1, children: 0, budget: '', source: 'phone', priority: 'medium', remarks: '', followUpDate: '', assignedEmployee: '' });
       loadKanban(); loadAnalytics();
-    } catch (err) { console.error(err); }
+    } catch (err) { alert(err.response?.data?.message || 'Failed to create lead'); console.error(err); }
     finally { setAddLoading(false); }
   };
 
